@@ -1,83 +1,73 @@
 module branch_prediction_globle#(
-	parameter LOW_ADDR_WIDTH = 8,
-	parameter BRANCH_HISTORY_WIDTH = 4
+	parameter GLOBAL_HISTORY_WIDTH = 10
 ) (
 	input clk,    // Clock
 	input rst_n,  // Asynchronous reset active low
 	
-	// prediction
+	// predict
 	input predict_valid,
-	input [LOW_ADDR_WIDTH - 1:0] predict_addr,
 	output reg predict_result,
 
 	// renew
 	input renew_valid,
-	input [LOW_ADDR_WIDTH - 1:0] renew_addr,
+	input last_predict,
 	input renew_result
 );
-
-integer i;
-
-// branch history table
-reg [BRANCH_HISTORY_WIDTH - 1:0] branch_history_table [2 ** LOW_ADDR_WIDTH - 1:0];
-genvar bi;
-generate
-	for (bi = 0; bi < 2 ** LOW_ADDR_WIDTH; bi = bi + 1) begin:bi_proc
-		always @ (posedge clk or negedge rst_n) begin
-			if(~rst_n) begin
-				branch_history_table[bi] <= 'b0;
-			end else if((predict_addr == bi) && renew_valid) begin
-				branch_history_table[bi] <= {branch_history_table[bi][BRANCH_HISTORY_WIDTH - 1:1],renew_result};
-			end
-		end
-	end	
-endgenerate
 
 localparam STRONG_JUMP = 2'b11;
 localparam WEAK_JUMP = 2'b10;
 localparam WEAK_NO_JUMP = 2'b01;
 localparam STRONG_NOP_JUMP = 2'b00;
 
-wire [BRANCH_HISTORY_WIDTH - 1:0] renew_pattern = branch_history_table[renew_addr];
-reg [1:0] pattern_history_table [BRANCH_HISTORY_WIDTH - 1:0];
-genvar pi;
+reg [GLOBAL_HISTORY_WIDTH - 1:0]global_history;
+always @ (posedge clk or negedge rst_n) begin
+	if(~rst_n) begin
+		global_history <= 'b0;
+	end else if(renew_valid) begin
+		global_history <= {global_history[GLOBAL_HISTORY_WIDTH - 2:0],renew_result};
+	end
+end
+
+reg [1:0] global_history_table [2 ** GLOBAL_HISTORY_WIDTH - 1:0];
+genvar ti;
 generate
-	for (pi = 0; pi < 2 ** BRANCH_HISTORY_WIDTH; pi = pi + 1) begin:pi_proc
-		
-		wire predict_tmp = pattern_history_table[pi][1];
+	for (ti = 0; ti < 2 ** GLOBAL_HISTORY_WIDTH; ti = ti + 1) begin:proc_ti
+
+		// wire predict_tmp = global_history_table[pi][1];
 
 		always @ (posedge clk or negedge rst_n) begin
 			if(~rst_n) begin
-				pattern_history_table[pi] <= STRONG_NOP_JUMP;
-			end else if((renew_pattern == pi) && renew_valid) begin
-				if(predict_tmp == renew_result) begin
-					case (pattern_history_table[pi])
-						STRONG_JUMP:pattern_history_table[pi] = STRONG_JUMP;
-						WEAK_JUMP:pattern_history_table[pi] = STRONG_JUMP;
-						STRONG_NOP_JUMP:pattern_history_table[pi] = STRONG_NOP_JUMP;
-						WEAK_NO_JUMP:pattern_history_table[pi] = STRONG_NOP_JUMP;
-						default:pattern_history_table[pi] = STRONG_NOP_JUMP;
+				global_history_table[ti] <= 'b0;
+			end else if(renew_valid && (global_history == ti)) begin
+				if(last_predict == renew_result) begin
+					case (global_history_table[pi])
+						STRONG_JUMP:global_history_table[pi] = STRONG_JUMP;
+						WEAK_JUMP:global_history_table[pi] = STRONG_JUMP;
+						STRONG_NOP_JUMP:global_history_table[pi] = STRONG_NOP_JUMP;
+						WEAK_NO_JUMP:global_history_table[pi] = STRONG_NOP_JUMP;
+						default:global_history_table[pi] = STRONG_NOP_JUMP;
 					endcase
 				end else begin
-					case (pattern_history_table[pi])
-						STRONG_JUMP:pattern_history_table[pi] = WEAK_JUMP;
-						WEAK_JUMP:pattern_history_table[pi] = STRONG_NOP_JUMP;
-						STRONG_NOP_JUMP:pattern_history_table[pi] = WEAK_NO_JUMP;
-						WEAK_NO_JUMP:pattern_history_table[pi] = STRONG_JUMP;
-						default:pattern_history_table[pi] = STRONG_NOP_JUMP;
+					case (global_history_table[pi])
+						STRONG_JUMP:global_history_table[pi] = WEAK_JUMP;
+						WEAK_JUMP:global_history_table[pi] = STRONG_NOP_JUMP;
+						STRONG_NOP_JUMP:global_history_table[pi] = WEAK_NO_JUMP;
+						WEAK_NO_JUMP:global_history_table[pi] = STRONG_JUMP;
+						default:global_history_table[pi] = STRONG_NOP_JUMP;
 					endcase
 				end
 			end
 		end
+
 	end
+
 endgenerate
 
-wire [BRANCH_HISTORY_WIDTH - 1:0] predict_pattern = pattern_history_table[predict_addr];
 always @ (posedge clk or negedge rst_n) begin
 	if(~rst_n) begin
-		predict_result <= 1'b0;
+		predict_result <= 'b0;
 	end else if(predict_valid) begin
-		predict_result <= pattern_history_table[predict_pattern][1];
+		predict_result <= global_history_table[global_history][1];
 	end
 end
 
