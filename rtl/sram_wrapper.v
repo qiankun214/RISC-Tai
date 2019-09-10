@@ -19,8 +19,8 @@ always @ (posedge clk) begin
 end
 
 always @ (posedge clk) begin
-	// q <= ram[addr];
-	q <= {(DATA_WIDTH - ADDR_WIDTH)'(0),addr}; // for test
+	q <= ram[addr];
+	// q <= {(DATA_WIDTH - ADDR_WIDTH)'(0),addr}; // for test
 end
 
 endmodule

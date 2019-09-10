@@ -43,6 +43,7 @@ initial begin
             $display("dump_file = %s",dump_file);
         $fsdbDumpfile(dump_file);
         $fsdbDumpvars(0, tb_mult_port_memory);
+        $fsdbDumpMDA(2 ** ADDR_WIDTH,dut);
     `endif
 
 end
@@ -76,19 +77,27 @@ class p2p_din;
 		this.port_num = num;
 	endfunction
 
-	task p2p_din_data();
+	task init();
 		@(posedge clk);
-		for (int i = 0; i < 16; i++) begin
-			din_addr[port_num*ADDR_WIDTH+:ADDR_WIDTH] = {(ADDR_WIDTH - 4)'(port_num),(4)'(i)};
-			din_data[port_num*DATA_WIDTH+:DATA_WIDTH] = i;
-			din_valid[port_num] = 1'b1;
-			do begin
-				@(posedge clk);
-			end while(din_busy[port_num] == 1'b1);
-			din_valid[port_num] = 1'b0;
-		end
+		din_addr[port_num*ADDR_WIDTH+:ADDR_WIDTH] = 'b0;
+		din_data[port_num*DATA_WIDTH+:DATA_WIDTH] = 'b0;
+		din_write_req[port_num] = 'b0;
+		din_valid[port_num] = 1'b0;
 		@(posedge clk);
+	endtask : init
+
+	task p2p_din_data(int addr,int data=0,logic write=0);
+		din_addr[port_num*ADDR_WIDTH+:ADDR_WIDTH] = addr;
+		din_data[port_num*DATA_WIDTH+:DATA_WIDTH] = data;
+		din_write_req[port_num] = write;
+		din_valid[port_num] = 1'b1;
+		do begin
+			@(posedge clk);
+		end while(din_busy[port_num] == 1'b1);
+		din_valid[port_num] = 1'b0;
+		din_write_req[port_num] = 1'b0;
 	endtask : p2p_din_data
+
 endclass : p2p_din
 
 task monitor_p2p_out(input integer port_num);
@@ -100,14 +109,15 @@ endtask : monitor_p2p_out
 initial begin
 	p2p_din port0;
 	port0 = new(0);
-
 	repeat(20) @(negedge clk);
-	// @(posedge clk);
-	// dout_busy[1] = 1'b1;
-	port0.p2p_din_data();
+	port0.init();
+	for (int i = 0; i < 16; i++) begin
+		port0.p2p_din_data(i,i,1);
+	end
 	repeat(64) @(negedge clk);
-	// p2p_din_data(1);
-	port0.p2p_din_data();
+	for (int i = 0; i < 16; i++) begin
+		port0.p2p_din_data(i);
+	end
 
 	repeat(64) @(negedge clk);
 	$finish;
@@ -117,9 +127,14 @@ initial begin
 	p2p_din port1;
 	port1 = new(1);
 	repeat(6) @(negedge clk);
-	port1.p2p_din_data();
-	repeat(64) @(negedge clk);
-	port1.p2p_din_data();
+	port1.init();
+	for (int i = 0; i < 16; i++) begin
+		port1.p2p_din_data(16+i,i,1);
+	end
+	repeat(50) @(negedge clk);
+	for (int i = 0; i < 16; i++) begin
+		port1.p2p_din_data(16+i);
+	end
 	repeat(64) @(negedge clk);
 	$finish;
 end

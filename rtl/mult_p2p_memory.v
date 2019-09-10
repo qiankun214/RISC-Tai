@@ -22,7 +22,7 @@ wire [PORT_NUM - 1:0]inter_busy;
 wire [PORT_NUM - 1:0]is_din = din_valid & (~din_busy);
 wire [PORT_NUM - 1:0]is_dout = dout_valid & (~dout_busy);
 wire [PORT_NUM - 1:0]is_dout_block = dout_valid & dout_busy;
-wire [PORT_NUM - 1:0]is_block = is_din & (is_dout_block | inter_busy);
+wire [PORT_NUM - 1:0]is_block = is_din & ((~din_write_req & is_dout_block) | inter_busy);
 
 genvar pi;
 reg [PORT_NUM - 1:0]inter_busy_buffer;
@@ -47,9 +47,9 @@ generate
 		always @ (posedge clk or negedge rst_n) begin
 			if(~rst_n) begin
 				din_busy[pi] <= 'b0;
-			end else if(dout_busy[pi] || is_block[pi] || block_sign[pi] || inter_busy[pi]) begin
+			end else if(is_block[pi]) begin
 				din_busy[pi] <= 1'b1;
-			end else begin
+			end else if(!inter_busy[pi] && !dout_busy[pi])begin
 				din_busy[pi] <= 'b0;
 			end
 		end
@@ -86,6 +86,7 @@ wire [PORT_NUM - 1:0] is_this_data = ~block_sign & ~inter_busy_buffer & is_din;
 reg [ADDR_WIDTH + DATA_WIDTH:0] this_data [PORT_NUM - 1:0];
 reg [ADDR_WIDTH + DATA_WIDTH:0] last_data [PORT_NUM - 1:0];
 reg [1:0] last_switch [PORT_NUM - 1:0];
+reg [PORT_NUM - 1:0] write_finish;
 generate
 	for (si = 0; si < PORT_NUM; si = si + 1) begin:proc_si
 		
@@ -129,14 +130,28 @@ generate
 		always @ (posedge clk or negedge rst_n) begin
 			if(~rst_n) begin
 				dout_valid[si] <= 'b0;
-			end else if( (is_this_data[si] || (last_switch[si] == S_THIS)) && !inter_busy[si] && is_din[si]) begin
-				dout_valid[si] <= 1'b1;
-			end else if( is_block_data[si] && !inter_busy[si]) begin //change here inter_busy_buffer->inter_busy
-				dout_valid[si] <= 1'b1;
-			end else if( (is_block_data[si] || (last_switch[si] == S_BLOCK)) && inter_busy_buffer[si] && !inter_busy[si]) begin
-				dout_valid[si] <= 1'b1;
+			end else if(!this_data[si][DATA_WIDTH + ADDR_WIDTH]) begin
+				if( (is_this_data[si] || (last_switch[si] == S_THIS)) && !inter_busy[si] && is_din[si]) begin
+					dout_valid[si] <= 1'b1;
+				end else if( is_block_data[si] && !inter_busy[si]) begin //change here inter_busy_buffer->inter_busy
+					dout_valid[si] <= 1'b1;
+				end else if( (is_block_data[si] || (last_switch[si] == S_BLOCK)) && inter_busy_buffer[si] && !inter_busy[si]) begin
+					dout_valid[si] <= 1'b1;
+				end else if(is_dout[si]) begin
+					dout_valid[si] <= 1'b0;
+				end
 			end else if(is_dout[si]) begin
-				dout_valid[si] <= 'b0;
+				dout_valid[si] <= 1'b0;
+			end
+		end
+		
+		always @ (posedge clk or negedge rst_n) begin
+			if(~rst_n) begin
+				write_finish[si] <= 1'b0;
+			end else if(!inter_busy[si] && this_data[si][DATA_WIDTH + ADDR_WIDTH])begin
+				write_finish[si] <= 1'b1;
+			end else begin
+				write_finish[si] <= 1'b0;
 			end
 		end
 	end
@@ -168,11 +183,13 @@ sram_wrapper #(
 );
 
 // token generate
-wire [PORT_NUM - 1:0] request = din_valid;
+
+
+wire [PORT_NUM - 1:0] request = din_valid | block_sign;
 genvar ti;
 wire [PORT_NUM - 1:0] token,token_c;
 reg [PORT_NUM - 1:0] token_reg;
-wire is_token_change = ((token_reg == 'b0) || ((token_reg & is_dout) != 'b0));
+wire is_token_change = ((token_reg == 'b0) || ((token_reg & is_dout) != 'b0)) || ((token_reg & write_finish) != 'b0);
 generate
 	for (ti = 0; ti < PORT_NUM; ti = ti + 1) begin:proc_ti
 		if(ti == 0) begin
@@ -181,6 +198,7 @@ generate
 			assign token_c[ti] = (request[ti] && (request[ti - 1:0] == 'b0));
 		end
 		assign token[ti] = is_token_change?token_c[ti]:token_reg[ti];
+		assign inter_busy[ti] = ~token[ti] && (token != 'b0);
 	end
 endgenerate
 always @ (posedge clk or negedge rst_n) begin
@@ -190,6 +208,5 @@ always @ (posedge clk or negedge rst_n) begin
 		token_reg <= token_c;
 	end 
 end
-assign inter_busy = ~token;
 
 endmodule
